@@ -17,7 +17,35 @@
  * ──────────────────────────────────────────────────────────────
  */
 
-const GA4_PROPERTY_ID = 'YOUR_PROPERTY_ID'; // ← 여기에 숫자 ID 입력
+const GA4_PROPERTY_ID = '521401240';
+
+// GA4에서 페이지 제목 가져오기 (pagePath → pageTitle 매핑)
+function fetchPageTitlesFromGA4(prop, dateRange) {
+  try {
+    var resp = AnalyticsData.Properties.runReport({
+      dateRanges: [dateRange],
+      dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
+      metrics: [{ name: 'screenPageViews' }],
+      orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
+      limit: 100
+    }, prop);
+    var titles = {};
+    (resp.rows || []).forEach(function(row) {
+      var path = row.dimensionValues[0].value.split('?')[0];
+      var title = row.dimensionValues[1].value || '';
+      // "제목 – 사이트명" 형식에서 사이트명 제거
+      title = title.replace(/\s*[-–—|]\s*나눔캠퍼스.*$/i, '').trim();
+      if (title && title !== '(not set)') {
+        // path 양쪽 변형 모두 저장 (/69, /69/)
+        var clean = path.replace(/\/$/, '');
+        if (!titles[path]) titles[path] = title;
+        if (clean && !titles[clean]) titles[clean] = title;
+        if (!titles[clean + '/']) titles[clean + '/'] = title;
+      }
+    });
+    return titles;
+  } catch(e) { return {}; }
+}
 
 // ─── 웹앱 진입점 ───────────────────────────────────────────────
 function doGet(e) {
@@ -45,6 +73,11 @@ function fetchAllGA4Data() {
   const curr = { startDate: '7daysAgo', endDate: 'yesterday' };
   const prev = { startDate: '14daysAgo', endDate: '8daysAgo' };
 
+  // 날짜 객체 (Search Console 등에서 사용)
+  const now  = new Date();
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  const s7   = new Date(yest); s7.setDate(yest.getDate() - 6);
+
   // ── 1. KPI (현재 기간 + 이전 기간 비교) ──────────────────────
   const kpiResp = AnalyticsData.Properties.runReport({
     dateRanges: [curr, prev],
@@ -58,6 +91,7 @@ function fetchAllGA4Data() {
     ]
   }, prop);
 
+  // dateRanges 2개일 때 rows[0]=현재, rows[1]=이전
   const cRow = (kpiResp.rows || [])[0] || { metricValues: Array(6).fill({ value: '0' }) };
   const pRow = (kpiResp.rows || [])[1] || { metricValues: Array(6).fill({ value: '0' }) };
   const cv = cRow.metricValues;
@@ -100,18 +134,20 @@ function fetchAllGA4Data() {
     metrics: [
       { name: 'sessions' },
       { name: 'activeUsers' },
-      { name: 'newUsers' }
+      { name: 'newUsers' },
+      { name: 'screenPageViews' }
     ],
     orderBys: [{ dimension: { dimensionName: 'date' } }]
   }, prop);
 
-  const trend = { labels: [], sessions: [], active: [], newU: [] };
+  const trend = { labels: [], sessions: [], active: [], newU: [], pageViews: [] };
   (trendResp.rows || []).forEach(function(row) {
     const d = row.dimensionValues[0].value; // YYYYMMDD
     trend.labels.push(parseInt(d.slice(4, 6)) + '/' + parseInt(d.slice(6, 8)));
     trend.sessions.push(parseInt(row.metricValues[0].value));
     trend.active.push(parseInt(row.metricValues[1].value));
     trend.newU.push(parseInt(row.metricValues[2].value));
+    trend.pageViews.push(parseInt(row.metricValues[3].value));
   });
 
   // ── 3. 디바이스 ───────────────────────────────────────────────
@@ -164,13 +200,13 @@ function fetchAllGA4Data() {
     countries.data.push(parseInt(row.metricValues[0].value));
   });
 
-  // ── 6. 트래픽 소스 Top 5 ─────────────────────────────────────
+  // ── 6. 트래픽 소스 Top 15 ────────────────────────────────────
   const srcResp = AnalyticsData.Properties.runReport({
     dateRanges: [curr],
     dimensions: [{ name: 'sessionSourceMedium' }],
-    metrics: [{ name: 'sessions' }],
-    orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
-    limit: 5
+    metrics: [{ name: 'eventCount' }],
+    orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
+    limit: 15
   }, prop);
 
   const sources = { labels: [], data: [] };
@@ -179,19 +215,19 @@ function fetchAllGA4Data() {
     sources.data.push(parseInt(row.metricValues[0].value));
   });
 
-  // ── 7. 브라우저 Top 6 ────────────────────────────────────────
-  const brwResp = AnalyticsData.Properties.runReport({
+  // ── 7. 도시 Top 7 ────────────────────────────────────────────
+  const cityResp = AnalyticsData.Properties.runReport({
     dateRanges: [curr],
-    dimensions: [{ name: 'browser' }],
-    metrics: [{ name: 'activeUsers' }],
-    orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
-    limit: 6
+    dimensions: [{ name: 'city' }],
+    metrics: [{ name: 'eventCount' }],
+    orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
+    limit: 7
   }, prop);
 
-  const browsers = { labels: [], data: [] };
-  (brwResp.rows || []).forEach(function(row) {
-    browsers.labels.push(row.dimensionValues[0].value);
-    browsers.data.push(parseInt(row.metricValues[0].value));
+  const cities = { labels: [], data: [] };
+  (cityResp.rows || []).forEach(function(row) {
+    cities.labels.push(row.dimensionValues[0].value);
+    cities.data.push(parseInt(row.metricValues[0].value));
   });
 
   // ── 8. 랜딩 페이지 Top 15 ────────────────────────────────────
@@ -207,7 +243,7 @@ function fetchAllGA4Data() {
   (lpResp.rows || []).forEach(function(row) {
     let path = row.dimensionValues[0].value;
     if (!path.startsWith('/')) path = '/' + path;
-    path = path.split('?')[0];
+    path = path.split('?')[0]; // 쿼리스트링 제거
     landingPages.push({
       path: path,
       sessions: parseInt(row.metricValues[0].value),
@@ -215,57 +251,149 @@ function fetchAllGA4Data() {
     });
   });
 
-  // ── 9. 페이지뷰 Top 15 ───────────────────────────────────────
+  // ── 9. 페이지뷰 Top 20 (pageTitle 포함) ─────────────────────
   const pvResp = AnalyticsData.Properties.runReport({
     dateRanges: [curr],
-    dimensions: [{ name: 'pagePath' }],
+    dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
     metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }],
     orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
-    limit: 15
+    limit: 20
   }, prop);
 
   const pageViews = [];
   (pvResp.rows || []).forEach(function(row) {
     let path = row.dimensionValues[0].value;
     path = path.split('?')[0];
+    var title = (row.dimensionValues[1].value || '').replace(/\s*[-–—|]\s*나눔캠퍼스.*$/i, '').trim();
     pageViews.push({
       path: path,
+      title: title || '',
       views: parseInt(row.metricValues[0].value),
       users: parseInt(row.metricValues[1].value)
     });
   });
 
-  // ── 10. 전환 (form_submit 이전 기간 비교) ────────────────────
-  const fsIdx    = events.labels.indexOf('form_submit');
-  const ecomCurr = fsIdx >= 0 ? events.data[fsIdx] : 0;
+  // ── 10. Ecommerce (generate_lead 이전 기간 비교) ─────────────
+  const glIdx    = events.labels.indexOf('generate_lead');
+  const ecomCurr = glIdx >= 0 ? events.data[glIdx] : 0;
 
-  const prevFsResp = AnalyticsData.Properties.runReport({
+  const prevGlResp = AnalyticsData.Properties.runReport({
     dateRanges: [prev],
     dimensions: [{ name: 'eventName' }],
     metrics: [{ name: 'eventCount' }],
     dimensionFilter: {
       filter: {
         fieldName: 'eventName',
-        stringFilter: { matchType: 'EXACT', value: 'form_submit' }
+        stringFilter: { matchType: 'EXACT', value: 'generate_lead' }
       }
     }
   }, prop);
 
-  const ecomPrev   = (prevFsResp.rows && prevFsResp.rows.length > 0)
-    ? parseInt(prevFsResp.rows[0].metricValues[0].value) : 1;
+  const ecomPrev   = (prevGlResp.rows && prevGlResp.rows.length > 0)
+    ? parseInt(prevGlResp.rows[0].metricValues[0].value) : 1;
   const ecomChange = ecomPrev > 0
     ? Math.round((ecomCurr - ecomPrev) / ecomPrev * 1000) / 10 : 0;
 
+  // ── 11. 시간대별 방문 (0~23시) ───────────────────────────────
+  const hourResp = AnalyticsData.Properties.runReport({
+    dateRanges: [curr],
+    dimensions: [{ name: 'hour' }],
+    metrics: [{ name: 'sessions' }, { name: 'activeUsers' }],
+    orderBys: [{ dimension: { dimensionName: 'hour' } }]
+  }, prop);
+
+  const hourly = { labels: [], sessions: [], activeUsers: [] };
+  for (var h = 0; h < 24; h++) { hourly.labels.push(h + '시'); hourly.sessions.push(0); hourly.activeUsers.push(0); }
+  (hourResp.rows || []).forEach(function(row) {
+    var hi = parseInt(row.dimensionValues[0].value);
+    hourly.sessions[hi] = parseInt(row.metricValues[0].value);
+    hourly.activeUsers[hi] = parseInt(row.metricValues[1].value);
+  });
+
+  // ── 12. 검색어 Top 20 (Google Search Console API via UrlFetchApp) ──
+  var searchTerms = [];
+  try {
+    var scUrl = 'https://www.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fnanumcampus.com%2F/searchAnalytics/query';
+    var scPayload = {
+      startDate: Utilities.formatDate(s7, 'Asia/Seoul', 'yyyy-MM-dd'),
+      endDate: Utilities.formatDate(yest, 'Asia/Seoul', 'yyyy-MM-dd'),
+      dimensions: ['query'],
+      rowLimit: 20,
+      dataState: 'all'
+    };
+    var scResp = UrlFetchApp.fetch(scUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify(scPayload),
+      muteHttpExceptions: true
+    });
+    var scData = JSON.parse(scResp.getContentText());
+    (scData.rows || []).forEach(function(row) {
+      searchTerms.push({
+        term: row.keys[0],
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: Math.round((row.ctr || 0) * 1000) / 10,
+        position: Math.round((row.position || 0) * 10) / 10
+      });
+    });
+  } catch(e) { /* Search Console 미연동 시 빈 배열 */ }
+
+  // ── 13. 신규 vs 재방문자 ──────────────────────────────────────
+  const nvrResp = AnalyticsData.Properties.runReport({
+    dateRanges: [curr],
+    dimensions: [{ name: 'newVsReturning' }],
+    metrics: [{ name: 'sessions' }]
+  }, prop);
+
+  var nvrMap = {};
+  var nvrTotal = 0;
+  (nvrResp.rows || []).forEach(function(row) {
+    var v = parseInt(row.metricValues[0].value);
+    nvrMap[row.dimensionValues[0].value] = v;
+    nvrTotal += v;
+  });
+  var newVsReturning = {
+    newPct: nvrTotal > 0 ? Math.round((nvrMap['new'] || 0) / nvrTotal * 1000) / 10 : 0,
+    returningPct: nvrTotal > 0 ? Math.round((nvrMap['returning'] || 0) / nvrTotal * 1000) / 10 : 0
+  };
+
+  // ── 14. 페이지별 평균 체류시간 Top 20 (pageTitle 포함) ─────────
+  const dwellResp = AnalyticsData.Properties.runReport({
+    dateRanges: [curr],
+    dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
+    metrics: [{ name: 'averageSessionDuration' }, { name: 'sessions' }],
+    orderBys: [{ metric: { metricName: 'averageSessionDuration' }, desc: true }],
+    limit: 20
+  }, prop);
+
+  var dwellTimePages = [];
+  (dwellResp.rows || []).forEach(function(row) {
+    var path = row.dimensionValues[0].value;
+    path = path.split('?')[0];
+    var title = (row.dimensionValues[1].value || '').replace(/\s*[-–—|]\s*나눔캠퍼스.*$/i, '').trim();
+    var dur = parseFloat(row.metricValues[0].value);
+    dwellTimePages.push({
+      path: path,
+      title: title || '',
+      avgDuration: dur,
+      avgMin: Math.floor(dur / 60),
+      avgSec: Math.round(dur % 60),
+      sessions: parseInt(row.metricValues[1].value)
+    });
+  });
+
   // ── 날짜 범위 문자열 ──────────────────────────────────────────
-  const now  = new Date();
-  const yest = new Date(now); yest.setDate(now.getDate() - 1);
-  const s7   = new Date(yest); s7.setDate(yest.getDate() - 6);
   const y1 = s7.getFullYear(), m1 = s7.getMonth() + 1, d1 = s7.getDate();
   const y2 = yest.getFullYear(), m2 = yest.getMonth() + 1, d2 = yest.getDate();
   let dateRangeStr;
   if (y1 === y2 && m1 === m2) dateRangeStr = y1 + '. ' + m1 + '. ' + d1 + '. ~ ' + m2 + '. ' + d2 + '.';
   else if (y1 === y2)          dateRangeStr = y1 + '. ' + m1 + '. ' + d1 + '. ~ ' + m2 + '. ' + d2 + '.';
   else                         dateRangeStr = y1 + '. ' + m1 + '. ' + d1 + '. ~ ' + y2 + '. ' + m2 + '. ' + d2 + '.';
+
+  // ── 페이지 제목 (GA4 pageTitle dimension) ──────────────────
+  var pageTitles = fetchPageTitlesFromGA4(prop, curr);
 
   return {
     dateRange:   dateRangeStr,
@@ -275,9 +403,40 @@ function fetchAllGA4Data() {
     events:      events,
     countries:   countries,
     sources:     sources,
-    browsers:    browsers,
+    cities:      cities,
     landingPages: landingPages,
     pageViews:   pageViews,
-    ecom:        { total: ecomCurr, change: ecomChange }
+    ecom:        { total: ecomCurr, change: ecomChange },
+    hourly:      hourly,
+    searchTerms: searchTerms,
+    newVsReturning: newVsReturning,
+    dwellTimePages: dwellTimePages,
+    pageTitles:  pageTitles
   };
+}
+
+// ─── Search Console 테스트 ──────────────────────────────────
+function testSearchConsole() {
+  var now = new Date();
+  var yest = new Date(now); yest.setDate(now.getDate() - 1);
+  var s7 = new Date(yest); s7.setDate(yest.getDate() - 6);
+
+  var scUrl = 'https://www.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fnanumcampus.com%2F/searchAnalytics/query';
+  var scPayload = {
+    startDate: Utilities.formatDate(s7, 'Asia/Seoul', 'yyyy-MM-dd'),
+    endDate: Utilities.formatDate(yest, 'Asia/Seoul', 'yyyy-MM-dd'),
+    dimensions: ['query'],
+    rowLimit: 5
+  };
+
+  var resp = UrlFetchApp.fetch(scUrl, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify(scPayload),
+    muteHttpExceptions: true
+  });
+
+  Logger.log('Status: ' + resp.getResponseCode());
+  Logger.log('Response: ' + resp.getContentText());
 }
