@@ -429,15 +429,108 @@ tr:hover td { background: #f0f4f8; }
 // ═══════════════════════════════════════════════════════════════
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwoYhvzUGBxho5tdZxyT69f8mtL2LZKWiI4sfS_vwlEin8AoTPilbhKa3yvSb8KY9Uh6g/exec';
 
-// 페이지명 매핑
+// 페이지명 매핑 (나눔캠퍼스 홈페이지 구조 참조문서 기반)
 const pageNames = {
   '/':'홈',
-  '/course/course_view.jsp':'교육과정',
+  '/main/index.jsp':'홈',
+  '/main/search.jsp':'검색',
+  // 수강신청
+  '/course/course_list.jsp':'수강신청(전체과정)',
+  '/course/course_view.jsp':'교육과정 상세',
+  '/course/review_list.jsp':'수강후기',
+  '/course/freepass_list.jsp':'프리패스',
+  '/course/course_schedule.jsp':'교육일정',
+  '/course/cpost.jsp':'과정 게시글',
+  // 강의실 (로그인 필요)
+  '/classroom/index.jsp':'나의 강의실(과정현황)',
+  '/classroom/viewer.jsp':'강의 수강(동영상)',
+  // 강사소개
+  '/tutor/tutor_list.jsp':'강사소개',
+  '/tutor/tutor_view.jsp':'강사 상세',
+  // 소개 (정적 페이지 - /main/page.jsp?code=xxx)
+  '/main/page.jsp':'페이지',
+  // 마이크로러닝
+  '/webtv/index.jsp':'마이크로러닝',
+  '/webtv/webtv_list.jsp':'전체 마이크로러닝',
+  '/webtv/webtv_view.jsp':'마이크로러닝 상세',
+  // 도서구입
+  '/book/book_list.jsp':'도서구입',
+  '/book/book_view.jsp':'도서 상세',
+  // 문의
+  '/main/formmail.jsp':'문의',
+  // 마이페이지
+  '/mypage/index.jsp':'마이페이지',
+  '/mypage/mypage.jsp':'마이페이지',
+  '/mypage/course_list1.jsp':'수강중인 과정',
+  '/mypage/course_list2.jsp':'종료된 과정',
+  '/mypage/cart_list.jsp':'장바구니',
+  '/mypage/certificate_list.jsp':'증명서 발급',
+  '/mypage/coupon_list.jsp':'쿠폰관리',
+  '/mypage/out.jsp':'회원탈퇴',
+  // 회원서비스
   '/member/login.jsp':'로그인',
-  '/member/join.jsp':'회원가입',
-  '/board/board_list.jsp':'게시판',
-  '/mypage/mypage.jsp':'마이페이지'
+  '/member/agreement.jsp':'회원가입(방법선택)',
+  '/member/join.jsp':'회원가입(약관동의)',
+  '/member/join2.jsp':'회원가입(정보입력)',
+  '/member/join_success.jsp':'회원가입 완료',
+  '/member/find.jsp':'아이디/비밀번호 찾기',
+  '/member/find_pw.jsp':'비밀번호 찾기',
+  '/member/find_id.jsp':'아이디 찾기',
+  '/member/zipcode.jsp':'우편번호 검색',
+  '/member/logout.jsp':'로그아웃',
+  // 주문/결제
+  '/order/payment.jsp':'결제',
+  '/order/discount_apply.jsp':'할인/쿠폰 적용',
+  // 마켓
+  '/product/product_list.jsp':'전체마켓',
+  '/product/product_view.jsp':'상품 상세',
+  // 커뮤니티 게시판 (code 파라미터로 구분)
+  '/board/index.jsp':'게시판',
+  '/board/board_view.jsp':'게시글 상세'
 };
+
+// 쿼리 파라미터(code, cid) 기반 페이지명 매핑
+const pageCodeNames = {
+  // /main/page.jsp?code=xxx
+  'greeting':'인사말',
+  'location':'찾아오시는길',
+  'refund':'환불규정',
+  'privacy':'개인정보처리방침',
+  'marketing':'마케팅수신동의',
+  'consignment':'개인정보 처리위탁',
+  'clause':'이용약관',
+  'card-notice':'신용카드 무이자 안내',
+  // /board/index.jsp?code=xxx
+  'notice':'공지사항',
+  'faq':'자주하는질문',
+  'pds':'자료실',
+  'qna':'문의게시판'
+};
+
+// 과정 카테고리 ID → 이름 매핑
+const categoryNames = {
+  '118600':'마케팅',
+  '120388':'B2B마케팅',
+  '120387':'세일즈',
+  '118601':'AI 실무',
+  '118602':'기획력',
+  '118603':'해외비즈역량',
+  '118604':'리더십',
+  '118605':'강사육성',
+  '118606':'인문학',
+  '118607':'취창업'
+};
+
+// 개별 교육과정 ID → 과정명 매핑
+const courseNames = {
+  '197315':'Claude Cowork 기초 실전',
+  '195140':'B2B 마케팅 Level 1 | 구조와 이해',
+  '195139':'B2B 마케팅 Level 2 | 전략과 설계',
+  '195138':'B2B 마케팅 Level 3 | 실행과 성과',
+  '194684':'기업강사를 위한 실전 AI 활용 과정',
+  '186444':'비즈니스 모델 캔버스'
+};
+
 var serverPageTitles = {};
 // 모든 페이지가 동일한 제목인 경우 path를 표시
 function isDuplicateTitle(title) {
@@ -446,10 +539,41 @@ function isDuplicateTitle(title) {
   return lower.indexOf('나눔캠퍼스') >= 0 && (lower.indexOf('기업 교육') >= 0 || lower.indexOf('온라인 교육') >= 0);
 }
 function getPageName(p) {
+  // 서버 제목 우선
   var clean = p.replace(/\/$/,'');
   var withSlash = clean + '/';
-  return serverPageTitles[p] || serverPageTitles[clean] || serverPageTitles[withSlash]
-    || pageNames[p] || pageNames[clean] || pageNames[withSlash] || p;
+  var serverTitle = serverPageTitles[p] || serverPageTitles[clean] || serverPageTitles[withSlash];
+  if (serverTitle && !isDuplicateTitle(serverTitle)) return serverTitle;
+
+  // 쿼리 파라미터 분리
+  var parts = p.split('?');
+  var basePath = parts[0].replace(/\/$/,'');
+  var params = {};
+  if (parts[1]) {
+    parts[1].split('&').forEach(function(kv) {
+      var pair = kv.split('=');
+      if (pair[0]) params[pair[0]] = pair[1] || '';
+    });
+  }
+
+  // code 파라미터 매핑 (page.jsp, board)
+  if (params.code && pageCodeNames[params.code]) {
+    return pageCodeNames[params.code];
+  }
+
+  // 교육과정 상세 id 파라미터 매핑 (course_view.jsp?id=xxx)
+  if (params.id && courseNames[params.id]) {
+    return courseNames[params.id];
+  }
+
+  // cid(카테고리) 파라미터 매핑
+  if (params.cid && categoryNames[params.cid]) {
+    var baseLabel = pageNames[basePath] || pageNames[basePath + '.jsp'] || '';
+    return baseLabel ? baseLabel + ' > ' + categoryNames[params.cid] : categoryNames[params.cid];
+  }
+
+  // 기본 경로 매핑
+  return pageNames[p] || pageNames[clean] || pageNames[basePath] || p;
 }
 
 // 채널별 대표색
